@@ -82,18 +82,43 @@ async def search(req: SearchRequest):
         "results": results[:15]  # max. 15 direkte Referenzen
     }
 
-
 @app.post("/fetch")
 async def fetch(req: FetchRequest):
     assert_allowed(req.url)
 
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "MyHealthBot/1.0"}) as client:
         r = await client.get(req.url)
 
     if r.status_code != 200:
         raise HTTPException(502, "Upstream error")
 
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Titel
+    title = soup.title.get_text(" ", strip=True) if soup.title else None
+
+    # Canonical URL (stabiler Link, falls gesetzt)
+    canonical_url = None
+    canon = soup.select_one('link[rel="canonical"]')
+    if canon and canon.get("href"):
+        canonical_url = canon["href"].strip()
+
+    # Meta-Description als Kurzbeschreibung
+    description = None
+    meta_desc = soup.select_one('meta[name="description"]')
+    if meta_desc and meta_desc.get("content"):
+        description = meta_desc["content"].strip()
+
+    # Fallback: erstes sinnvolles Textstück als Snippet
+    full_text = extract_text(r.text)
+    snippet = description or (full_text[:500] if full_text else None)
+
     return {
         "url": req.url,
-        "text": extract_text(r.text)[:15000]
+        "canonical_url": canonical_url,
+        "title": title,
+        "snippet": snippet,
+        "text": full_text[:15000]
     }
+
+
